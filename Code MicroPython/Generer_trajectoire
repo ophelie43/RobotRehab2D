@@ -3,23 +3,22 @@ import time
 import threading
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
+import os
 from math import atan, sqrt, degrees, radians, cos, sin, atan2
 
 # --- 1. Constantes et Modèle Cinématique ---
 la, lb, lc = 0.27, 0.315, 0.08
+NOM_FICHIER_CSV = "suivi_robot.csv"
 
 def cinematique_directe(theta1, theta4):
-    """Calcule la position réelle (xc, yc) à partir des angles lus."""
     t1, t4 = radians(theta1), radians(theta4)
     try:
         E = 2 * lb * (lc + la * (cos(t4) - cos(t1)))
         F = 2 * la * lb * (sin(t4) - sin(t1))
         G = lc**2 + 2 * la**2 + 2 * lc * la * cos(t4) - 2 * lc * la * cos(t1) - 2 * la**2 * cos(t4 - t1)
-        
-        # Utilisation de atan2 pour la stabilité mathématique
         arg_racine = max(0, E**2 + F**2 - G**2)
         angle_interne = 2 * atan2((-F - sqrt(arg_racine)), (G - E))
-        
         xc = lc + la * cos(t4) + lb * cos(angle_interne)
         yc = la * sin(t4) + lb * sin(angle_interne)
         return xc, yc
@@ -31,32 +30,41 @@ def cinematique_inverse(xc, yc):
     G1 = la**2 - lb**2 + xc**2 + yc**2 
     E4, F4 = 2 * la * (-xc + lc), -2 * la * yc
     G4 = lc**2 + la**2 - lb**2 + xc**2 + yc**2 - 2 * lc * xc 
-    
     theta1 = 2 * np.atan((-F1 + np.sqrt(max(0, E1**2 + F1**2 - G1**2))) / (G1 - E1)) 
     theta4 = 2 * np.atan((-F4 - np.sqrt(max(0, E4**2 + F4**2 - G4**2))) / (G4 - E4)) 
     return degrees(theta1) - 7, degrees(theta4) + 9
 
-# --- 2. Configuration des Ports Séries ---
+# --- 2. Fonctions CSV ---
+def initialiser_csv():
+    """Crée l'en-tête du fichier s'il n'existe pas encore."""
+    if not os.path.exists(NOM_FICHIER_CSV):
+        with open(NOM_FICHIER_CSV, mode='w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "Horodatage", "Essai_ID", "X_Voulu", "Y_Voulu", "Theta1_Voulu", "Theta4_Voulu",
+                "X_Encodeur", "Y_Encodeur", "Theta1_Encodeur", "Theta4_Encodeur"
+            ])
+
+def sauvegarder_donnees(data_list):
+    """Ajoute une liste de lignes au fichier CSV."""
+    with open(NOM_FICHIER_CSV, mode='a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerows(data_list)
+
+# --- 3. Configuration des Ports Séries ---
 try:
     carte_servo1 = serial.Serial('COM9', 115200, timeout=0.05)
     carte_servo2 = serial.Serial('COM5', 115200, timeout=0.05)
-    print("Jarvis : Connexion aux deux cartes Servo 2040 établie avec succès.")
+    print("Jarvis : Connexion établie.")
 except serial.SerialException as e:
-    print(f"Jarvis : Erreur matérielle sur les ports COM - {e}")
-    exit()
+    print(f"Jarvis : Erreur COM - {e}"); exit()
 
 time.sleep(2) 
 
-# --- 3. Variables Globales & Calibration ---
+# --- 4. Variables Globales & Suivi ---
 offsets_encodeurs = {"COM9 - S1": None, "COM5 - S2": None}
-angles_consigne = {"COM9 - S1": 135.0 - 7, "COM5 - S2": 45.0 + 9}
-angles_reels = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
-
-# Variables pour le graphique
-hist_x_voulu, hist_y_voulu = [], []
-hist_x_reel, hist_y_reel = [], []
-
-# Position actuelle stockée pour le thread
+angles_consigne_init = {"COM9 - S1": 135.0 - 7, "COM5 - S2": 45.0 + 9}
+angles_reels_calib = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
 angles_actuels = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
 
 def lire_et_afficher(port, nom_carte):
@@ -68,72 +76,67 @@ def lire_et_afficher(port, nom_carte):
                 angle_brut = float(ligne.split(":")[1])
                 if offsets_encodeurs[nom_carte] is None:
                     offsets_encodeurs[nom_carte] = angle_brut
-                    print(f"Jarvis : [CALIBRATION] {nom_carte} calé.")
-                
-                # Mise à jour de la position réelle
-                angles_actuels[nom_carte] = (angle_brut - offsets_encodeurs[nom_carte]) + angles_reels[nom_carte]
+                angles_actuels[nom_carte] = (angle_brut - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte]
             except: pass
 
-def envoyer_angle(port, angle):
-    port.write(f"S:{angle}\n".encode('utf-8'))
-
 def executer_trajectoire():
-    """Exécute une série de points et enregistre les données."""
+    essai_id = time.strftime("%H%M%S") # ID unique basé sur l'heure
     points = [(0.0, 0.4), (0.1, 0.4), (0.1, 0.3), (-0.1, 0.3), (-0.1, 0.4), (0.0, 0.4)]
     
-    print("\nJarvis : Démarrage de la trajectoire de test...")
+    donnees_a_sauver = []
+    
+    print(f"\nJarvis : Essai {essai_id} en cours...")
     for px, py in points:
         try:
-            th1, th4 = cinematique_inverse(px, py)
-            envoyer_angle(carte_servo1, th1)
-            envoyer_angle(carte_servo2, th4)
+            th1_consigne, th4_consigne = cinematique_inverse(px, py)
+            carte_servo1.write(f"S:{th1_consigne}\n".encode())
+            carte_servo2.write(f"S:{th4_consigne}\n".encode())
             
-            time.sleep(1.5) # Temps de stabilisation
+            time.sleep(1.5)
             
-            # Calcul de la position réelle à l'arrivée
-            rx, ry = cinematique_directe(angles_actuels["COM9 - S1"], angles_actuels["COM5 - S2"])
+            # Mesure réelle via encodeurs
+            ang1_real = angles_actuels["COM9 - S1"]
+            ang4_real = angles_actuels["COM5 - S2"]
+            rx, ry = cinematique_directe(ang1_real, ang4_real)
             
             if rx is not None:
-                hist_x_voulu.append(px); hist_y_voulu.append(py)
-                hist_x_reel.append(rx); hist_y_reel.append(ry)
-                print(f"Voulu: ({px}, {py}) | Réel: ({rx:.3f}, {ry:.3f})")
+                # Préparation de la ligne CSV
+                donnees_a_sauver.append([
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    essai_id,
+                    px, py, round(th1_consigne + 7, 2), round(th4_consigne - 9, 2),
+                    round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
+                ])
+                print(f"Point enregistré : ({px}, {py})")
         except:
-            print(f"Point ({px}, {py}) hors de portée.")
+            print(f"Point ({px}, {py}) inatteignable.")
 
-    # Affichage du graphique
-    plt.figure(figsize=(8,6))
-    plt.plot(hist_x_voulu, hist_y_voulu, 'r--', label='Trajectoire Demandée', marker='o')
-    plt.plot(hist_x_reel, hist_y_reel, 'b-x', label='Trajectoire Réelle')
-    plt.xlabel('X (m)'); plt.ylabel('Y (m)')
-    plt.title('Comparaison Trajectoire')
-    plt.legend(); plt.grid(True); plt.axis('equal')
-    plt.show()
+    sauvegarder_donnees(donnees_a_sauver)
+    print(f"Jarvis : Données ajoutées au fichier {NOM_FICHIER_CSV}.")
 
-# --- 4. Interface de Commande ---
+# --- 5. Interface & Boucle ---
 def interface_saisie():
     time.sleep(3) 
     while True:
-        entree = input("\nJarvis : Tapez 'GO' pour lancer la trajectoire ou 'X Y' pour un point : ").strip().upper()
+        entree = input("\nJarvis : 'GO' pour trajectoire ou 'X Y' : ").strip().upper()
         if entree == "GO":
             executer_trajectoire()
         elif entree:
             try:
-                coords = entree.split()
-                if len(coords) == 2:
-                    tx, ty = float(coords[0]), float(coords[1])
-                    th1, th4 = cinematique_inverse(tx, ty)
-                    envoyer_angle(carte_servo1, th1)
-                    envoyer_angle(carte_servo2, th4)
+                c = entree.split()
+                if len(c) == 2:
+                    th1, th4 = cinematique_inverse(float(c[0]), float(c[1]))
+                    carte_servo1.write(f"S:{th1}\n".encode())
+                    carte_servo2.write(f"S:{th4}\n".encode())
             except: pass
 
-thread_saisie = threading.Thread(target=interface_saisie, daemon=True)
-thread_saisie.start()
+threading.Thread(target=interface_saisie, daemon=True).start()
 
-# --- 5. Boucle Principale ---
 try:
-    print("\nJarvis : Démarrage du système.")
-    envoyer_angle(carte_servo1, angles_consigne["COM9 - S1"])
-    envoyer_angle(carte_servo2, angles_consigne["COM5 - S2"])
+    initialiser_csv()
+    print("\nJarvis : Système prêt.")
+    carte_servo1.write(f"S:{angles_consigne_init['COM9 - S1']}\n".encode())
+    carte_servo2.write(f"S:{angles_consigne_init['COM5 - S2']}\n".encode())
     time.sleep(2)
     
     carte_servo1.reset_input_buffer()
@@ -145,4 +148,4 @@ try:
         time.sleep(0.01)
 
 except KeyboardInterrupt:
-    carte_servo1.close(); carte_servo2.close()
+    print("\nFermeture."); carte_servo1.close(); carte_servo2.close()
