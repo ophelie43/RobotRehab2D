@@ -86,7 +86,7 @@ def executer_trajectoire():
     # Sommets initiaux
     sommets = [(0.0, 0.4), (0.1, 0.4), (0.1, 0.3), (-0.1, 0.3), (-0.1, 0.4), (0.0, 0.4)]
     
-    nb_pas = 20  # Nombre de points entre chaque sommet pour la fluidité
+    nb_pas = 20  # Nombre de points entre chaque sommet
     donnees_a_sauver = []
     
     print(f"\nJarvis : Démarrage de la trajectoire fluide (Essai {essai_id})...")
@@ -95,26 +95,22 @@ def executer_trajectoire():
         p_depart = sommets[i]
         p_arrivee = sommets[i+1]
         
-        # Génération des points intermédiaires (interpolation)
         for pas in range(nb_pas):
-            # Calcul du point intermédiaire entre p_depart et p_arrivee
             ratio = pas / nb_pas
             px = p_depart[0] + (p_arrivee[0] - p_depart[0]) * ratio
             py = p_depart[1] + (p_arrivee[1] - p_depart[1]) * ratio
             
             try:
-                # 1. Calcul et Envoi immédiat
+                # 1. Calcul et Envoi (Correction des noms de ports ici)
                 th1_consigne, th4_consigne = cinematique_inverse(px, py)
-                carte_servo1.write(f"S:{th1_consigne}\n".encode())
-                carte_servo2.write(f"S:{th4_consigne}\n".encode())
+                s1_port.write(f"S:{th1_consigne}\n".encode())
+                s2_port.write(f"S:{th4_consigne}\n".encode())
                 
-                # 2. Temps très court entre les points pour un mouvement fluide
-                # Ajuste cette valeur (0.05 à 0.1) selon la réactivité de tes servos
                 time.sleep(0.08)
                 
-                # 3. Mesure et stockage
-                ang1_real = angles_actuels["COM9 - S1"]
-                ang4_real = angles_actuels["COM5 - S2"]
+                # 2. Mesure (Correction du nom de la variable ici)
+                ang1_real = pos_actuelle_deg["S1"]
+                ang4_real = pos_actuelle_deg["S2"]
                 rx, ry = cinematique_directe(ang1_real, ang4_real)
                 
                 if rx is not None:
@@ -124,8 +120,12 @@ def executer_trajectoire():
                         px, py, round(th1_consigne + 7, 2), round(th4_consigne - 9, 2),
                         round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
                     ])
-            except:
-                continue # Ignore les points hors de portée
+            except Exception as e:
+                print(f"Erreur point : {e}")
+                continue 
+
+    # Optionnel : Si tu veux sauvegarder en CSV, n'oublie pas de définir sauvegarder_donnees()
+    print(f"Jarvis : Trajectoire {essai_id} terminée.")
 
 # --- 5. Interface et Tracé Graphique ---
 def interface():
