@@ -80,47 +80,110 @@ def lire_et_afficher(port, nom_carte):
             except: pass
 
 def executer_trajectoire():
-    essai_id = time.strftime("%H%M%S") # ID unique basé sur l'heure
-    points = [(0.0, 0.4), (0.1, 0.4), (0.1, 0.3), (-0.1, 0.3), (-0.1, 0.4), (0.0, 0.4)]
+    essai_id = time.strftime("%H%M%S")
+    # Sommets initiaux
+    sommets = [(0.0, 0.4), (0.1, 0.4), (0.1, 0.3), (-0.1, 0.3), (-0.1, 0.4), (0.0, 0.4)]
+    
+    nb_pas = 20  # Nombre de points entre chaque sommet pour la fluidité
+    donnees_a_sauver = []
+    
+    print(f"\nJarvis : Démarrage de la trajectoire fluide (Essai {essai_id})...")
+    
+    for i in range(len(sommets) - 1):
+        p_depart = sommets[i]
+        p_arrivee = sommets[i+1]
+        
+        # Génération des points intermédiaires (interpolation)
+        for pas in range(nb_pas):
+            # Calcul du point intermédiaire entre p_depart et p_arrivee
+            ratio = pas / nb_pas
+            px = p_depart[0] + (p_arrivee[0] - p_depart[0]) * ratio
+            py = p_depart[1] + (p_arrivee[1] - p_depart[1]) * ratio
+            
+            try:
+                # 1. Calcul et Envoi immédiat
+                th1_consigne, th4_consigne = cinematique_inverse(px, py)
+                carte_servo1.write(f"S:{th1_consigne}\n".encode())
+                carte_servo2.write(f"S:{th4_consigne}\n".encode())
+                
+                # 2. Temps très court entre les points pour un mouvement fluide
+                # Ajuste cette valeur (0.05 à 0.1) selon la réactivité de tes servos
+                time.sleep(0.08)
+                
+                # 3. Mesure et stockage
+                ang1_real = angles_actuels["COM9 - S1"]
+                ang4_real = angles_actuels["COM5 - S2"]
+                rx, ry = cinematique_directe(ang1_real, ang4_real)
+                
+                if rx is not None:
+                    donnees_a_sauver.append([
+                        time.strftime("%Y-%m-%d %H:%M:%S"),
+                        essai_id,
+                        px, py, round(th1_consigne + 7, 2), round(th4_consigne - 9, 2),
+                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
+                    ])
+            except:
+                continue # Ignore les points hors de portée
+
+    sauvegarder_donnees(donnees_a_sauver)
+    print(f"Jarvis : Trajectoire fluide terminée. Données enregistrées dans {NOM_FICHIER_CSV}.")
+
+def executer_cercle():
+    essai_id = time.strftime("CERCLE_%H%M%S")
+    
+    # Paramètres du cercle
+    centre_x, centre_y = 0.0, 0.35  # Centre du cercle en mètres
+    rayon = 0.1                    # Rayon de 5 cm
+    nb_points = 100                 # Nombre de segments pour la fluidité
     
     donnees_a_sauver = []
     
-    print(f"\nJarvis : Essai {essai_id} en cours...")
-    for px, py in points:
+    print(f"\nJarvis : Génération d'une trajectoire circulaire (Essai {essai_id})...")
+    
+    for i in range(nb_points + 1):
+        # Calcul de l'angle de 0 à 2*pi
+        angle_cercle = (2 * np.pi * i) / nb_points
+        
+        # Coordonnées cartésiennes du point visé
+        px = centre_x + rayon * np.cos(angle_cercle)
+        py = centre_y + rayon * np.sin(angle_cercle)
+        
         try:
+            # 1. Calcul et Envoi
             th1_consigne, th4_consigne = cinematique_inverse(px, py)
             carte_servo1.write(f"S:{th1_consigne}\n".encode())
             carte_servo2.write(f"S:{th4_consigne}\n".encode())
             
-            time.sleep(1.5)
+            # 2. Petit délai pour la fluidité (ajustable)
+            time.sleep(0.05)
             
-            # Mesure réelle via encodeurs
+            # 3. Mesure réelle via les encodeurs
             ang1_real = angles_actuels["COM9 - S1"]
             ang4_real = angles_actuels["COM5 - S2"]
             rx, ry = cinematique_directe(ang1_real, ang4_real)
             
             if rx is not None:
-                # Préparation de la ligne CSV
                 donnees_a_sauver.append([
                     time.strftime("%Y-%m-%d %H:%M:%S"),
                     essai_id,
                     px, py, round(th1_consigne + 7, 2), round(th4_consigne - 9, 2),
                     round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
                 ])
-                print(f"Point enregistré : ({px}, {py})")
         except:
-            print(f"Point ({px}, {py}) inatteignable.")
+            continue
 
     sauvegarder_donnees(donnees_a_sauver)
-    print(f"Jarvis : Données ajoutées au fichier {NOM_FICHIER_CSV}.")
-
+    print(f"Jarvis : Cercle terminé. Données ajoutées au fichier {NOM_FICHIER_CSV}.")
+    
 # --- 5. Interface & Boucle ---
 def interface_saisie():
     time.sleep(3) 
     while True:
-        entree = input("\nJarvis : 'GO' pour trajectoire ou 'X Y' : ").strip().upper()
+        entree = input("\nJarvis : 'GO' (carré), 'CERCLE' ou 'X Y' : ").strip().upper()
         if entree == "GO":
             executer_trajectoire()
+        elif entree == "CERCLE":
+            executer_cercle()
         elif entree:
             try:
                 c = entree.split()
