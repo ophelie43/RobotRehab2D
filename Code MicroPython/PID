@@ -201,13 +201,16 @@ def lire_et_afficher(port, nom_carte):
     global offsets_encodeurs, angles_actuels
     if port.in_waiting > 0:
         ligne = port.readline().decode('utf-8', errors='ignore').strip()
-        if ligne.startswith("ENCODEUR:"):
+        if ligne and "ENCODEUR:" in ligne and "|COURANT:" in ligne:
+            
             try:
-                angle_brut = float(ligne.split(":")[1])
+                parties = ligne.split("|")
+                angle = float(parties[0].split(":")[1])
+                courant = float(parties[1].split(":")[1])
                 if offsets_encodeurs[nom_carte] is None:
-                    offsets_encodeurs[nom_carte] = angle_brut
+                    offsets_encodeurs[nom_carte] = angle
                 # L'angle calculé ici est la mathématique pure
-                angles_actuels[nom_carte] = (angle_brut - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte]
+                angles_actuels[nom_carte] = (angle - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte]
             except: pass
 
 # --- 7. Fonctions de Mouvement ---
