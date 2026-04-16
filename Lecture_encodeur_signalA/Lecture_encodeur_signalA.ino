@@ -1,25 +1,52 @@
+#include <SPI.h>
+
+// Pin Slave Select
+const int slaveSelectPin = D7;
+
+// Stop / Run
+bool stopProgram = false;
+
 void setup() {
-  // Une vitesse plus haute (115200) est préférable pour le plotter
-  Serial.begin(115200); 
+
+  Serial.begin(9600);
+
+  pinMode(slaveSelectPin, OUTPUT);
+  digitalWrite(slaveSelectPin, HIGH);
+
+  SPI.begin();
+  Serial.println("SPI Ready sur XIAO nRF52840");
+  Serial.println("s = stop | r = run");
 }
 
 void loop() {
-  // Lecture de la valeur analogique (0 à 1023) sur A0
-  int rawValue = analogRead(A0);
-  
-  // Conversion en tension réelle (V)
-  float voltage = rawValue * (5.0 / 1023.0);
+  // Gestion stop/run (inchangée) [cite: 3, 4, 5, 6]
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    if (cmd == 's') stopProgram = true;
+    if (cmd == 'r') stopProgram = false;
+  }
+  if (stopProgram) return;
 
-  // --- Affichage pour le Serial Plotter ---
-  // On affiche des "bornes" fixes pour stabiliser le graphique
-  Serial.print(0.0);    // Limite basse
-  Serial.print(" ");
-  Serial.print(3.0);    // Limite haute
-  Serial.print(" ");
-  
-  // La valeur mesurée
-  Serial.println(voltage);
+  // Transaction SPI corrigée
+  SPI.beginTransaction(SPISettings(100000, MSBFIRST, SPI_MODE0)); // Vitesse stable [cite: 7]
+  digitalWrite(slaveSelectPin, LOW);
 
-  // Un délai très court pour voir les transitions en "temps réel"
-  delay(5); 
+  // On lit 2 octets sans envoyer de commande 0x80
+  byte byte1 = SPI.transfer(0x00); 
+  byte byte2 = SPI.transfer(0x00); 
+
+  digitalWrite(slaveSelectPin, HIGH);
+  SPI.endTransaction();
+
+  // Extraction du statut (2 premiers bits)
+  byte status = (byte1 & 0xC0) >> 6;
+  
+  // Extraction de la pression brute (14 bits)
+  int rawData = ((byte1 & 0x3F) << 8) | byte2;
+
+  // Affichage [cite: 9, 10]
+  Serial.print("Statut: "); Serial.print(status);
+  Serial.print(" | Pression Brute: "); Serial.println(rawData);
+
+  delay(500); 
 }

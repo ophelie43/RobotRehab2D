@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 # --- 1. Constantes et Modèle Cinématique ---
 la, lb, lc = 0.27, 0.315, 0.08
-NOM_FICHIER_CSV = "rectangle.csv"
+NOM_FICHIER_CSV = "/Users/opheliesenechal/Desktop/Bureau - MacBook Pro de Ophélie/UPIR Hiver 2026/Code/rectangle.csv"
 
 def cinematique_directe(theta1, theta4):
     t1, t4 = radians(theta1), radians(theta4)
@@ -108,7 +108,7 @@ def initialiser_csv():
             writer.writerow([
                 "Horodatage", "Essai_ID", "X_Voulu", "Y_Voulu", "Theta1_Cible", "Theta4_Cible",
                 "Correction_M1", "Correction_M2", 
-                "X_Encodeur", "Y_Encodeur", "Theta1_Encodeur", "Theta4_Encodeur"
+                "X_Encodeur", "Y_Encodeur", "Theta1_Encodeur", "Theta4_Encodeur", "Courant1", "Courant4"
             ])
 
 def sauvegarder_donnees(data_list):
@@ -117,15 +117,17 @@ def sauvegarder_donnees(data_list):
         writer.writerows(data_list)
 
 # --- 4. Affichage et Analyse (Matplotlib) ---
+
 def tracer_analyse(donnees):
     """
     Génère un tableau de bord de 4 graphiques pour analyser le comportement du PID.
-    Affiche également l'erreur spatiale moyenne.
+    Sauvegarde le résultat en image pour éviter les plantages de Thonny/macOS.
     """
     if not donnees:
         print("Jarvis : Aucune donnée à tracer.")
         return
 
+    # Extraction des données par colonnes
     x_voulu = [ligne[2] for ligne in donnees]
     y_voulu = [ligne[3] for ligne in donnees]
     corr_m1 = [ligne[6] for ligne in donnees]
@@ -135,56 +137,15 @@ def tracer_analyse(donnees):
     
     temps_index = range(len(donnees))
 
-    # Calcul de l'erreur moyenne (Euclidienne)
-    arr_xv, arr_yv = np.array(x_voulu), np.array(y_voulu)
-    arr_xr, arr_yr = np.array(x_reel), np.array(y_reel)
-    
-    distances_erreur = np.sqrt((arr_xv - arr_xr)**2 + (arr_yv - arr_yr)**2)
-    erreur_moyenne_m = np.mean(distances_erreur)
-    erreur_moyenne_mm = erreur_moyenne_m * 1000 
-    
-    print(f"\n=====================================")
-    print(f"Jarvis : Performance du PID")
-    print(f"Jarvis : Erreur spatiale moyenne = {erreur_moyenne_mm:.2f} mm")
-    print(f"=====================================\n")
-
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-    fig.canvas.manager.set_window_title("Analyse du Contrôleur PID")
-
-    ax1.plot(temps_index, y_voulu, 'b--', label='Y Cible', linewidth=2)
-    ax1.plot(temps_index, y_reel, 'r-', label='Y Réel', linewidth=1.5)
-    ax1.set_title("Suivi de la position Y")
-    ax1.set_ylabel("Position Y (m)")
-    ax1.legend(); ax1.grid(True)
-
-    ax2.plot(temps_index, x_voulu, 'b--', label='X Cible', linewidth=2)
-    ax2.plot(temps_index, x_reel, 'r-', label='X Réel', linewidth=1.5)
-    ax2.set_title("Suivi de la position X")
-    ax2.set_ylabel("Position X (m)")
-    ax2.legend(); ax2.grid(True)
-
-    ax3.plot(temps_index, corr_m1, 'g-', label='Correction M1 (deg)', alpha=0.7)
-    ax3.plot(temps_index, corr_m2, 'm-', label='Correction M2 (deg)', alpha=0.7)
-    ax3.set_title("Effort de Contrôle (Activité du PID)")
-    ax3.set_ylabel("Correction (degrés)")
-    ax3.set_xlabel("Temps (itérations)")
-    ax3.legend(); ax3.grid(True)
-    
-    ax4.plot(x_voulu, y_voulu, 'b--', label='Cible', linewidth=2)
-    ax4.plot(x_reel, y_reel, 'r-', label='Réel', linewidth=1.5)
-    ax4.set_title(f"Trajectoire Spatiale (Erreur Moy. : {erreur_moyenne_mm:.1f} mm)")
-    ax4.set_xlabel("Position X (m)")
-    ax4.set_ylabel("Position Y (m)")
-    ax4.set_aspect('equal', adjustable='datalim') 
-    ax4.legend(); ax4.grid(True)
-
-    plt.tight_layout()
+    plt.plot(x_voulu,y_voulu)
     plt.show()
+    
+    
 
 # --- 5. Configuration des Ports Séries ---
 try:
-    carte_servo1 = serial.Serial('/dev/tty.usbmodem1101', 115200, timeout=0.05)# COM9
-    carte_servo2 = serial.Serial('/dev/tty.usbmodem101', 115200, timeout=0.05) # COM5
+    carte_servo1 = serial.Serial('/dev/tty.usbmodem101', 115200, timeout=0.05)# COM9
+    carte_servo2 = serial.Serial('/dev/tty.usbmodem1101', 115200, timeout=0.05) # COM5 et -7°
     print("Jarvis : Connexion établie.")
 except serial.SerialException as e:
     print(f"Jarvis : Erreur COM - {e}"); exit()
@@ -196,21 +157,26 @@ offsets_encodeurs = {"COM9 - S1": None, "COM5 - S2": None}
 angles_consigne_init = {"COM9 - S1": 135.0 - 7.0, "COM5 - S2": 45.0 + 9.0}
 angles_reels_calib = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
 angles_actuels = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
+courants_actuels = {"COM9 - S1": 0.0, "COM5 - S2": 0.0}
 
 def lire_et_afficher(port, nom_carte):
     global offsets_encodeurs, angles_actuels
     if port.in_waiting > 0:
         ligne = port.readline().decode('utf-8', errors='ignore').strip()
-        if ligne and "ENCODEUR:" in ligne and "|COURANT:" in ligne:
+        if ligne and "ENCODEUR:" in ligne and "| COURANT:" in ligne:
             
             try:
                 parties = ligne.split("|")
                 angle = float(parties[0].split(":")[1])
                 courant = float(parties[1].split(":")[1])
+                print(f"{nom_carte} >> ENCODEUR: {angle} | COURANT: {courant}")
                 if offsets_encodeurs[nom_carte] is None:
                     offsets_encodeurs[nom_carte] = angle
+
                 # L'angle calculé ici est la mathématique pure
                 angles_actuels[nom_carte] = (angle - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte]
+                courants_actuels[nom_carte] = courant
+                
             except: pass
 
 # --- 7. Fonctions de Mouvement ---
@@ -226,7 +192,10 @@ def executer_trajectoire():
     point_depart = sommets[0]
     th1_init, th4_init = cinematique_inverse(point_depart[0], point_depart[1])
     carte_servo1.write(f"S:{th1_init - 7.0}\n".encode())
+    lire_et_afficher(carte_servo1, "COM9 - S1")
+
     carte_servo2.write(f"S:{th4_init + 9.0}\n".encode())
+    lire_et_afficher(carte_servo2, "COM5 - S2")
     
     print("Jarvis : Mise en position initiale. Attente de stabilisation...")
     time.sleep(2) 
@@ -248,7 +217,11 @@ def executer_trajectoire():
                     th1_cible, th4_cible = cinematique_inverse(px, py)
                     ang1_real = angles_actuels["COM9 - S1"]
                     ang4_real = angles_actuels["COM5 - S2"]
-                    
+
+                    #courants_actuels[carte_servo1] = courant
+                    current1 = courants_actuels["COM9 - S1"]
+                    current4 = courants_actuels["COM5 - S2"]
+
                     corr1 = pid_moteur1.calculer(th1_cible, ang1_real)
                     corr2 = pid_moteur2.calculer(th4_cible, ang4_real)
                     
@@ -258,6 +231,8 @@ def executer_trajectoire():
                     carte_servo1.write(f"S:{cmd_th1}\n".encode())
                     carte_servo2.write(f"S:{cmd_th4}\n".encode())
                     
+
+
                     time.sleep(0.08) # Boucle rapide de 80ms
                     
                     rx, ry = cinematique_directe(ang1_real, ang4_real)
@@ -266,14 +241,14 @@ def executer_trajectoire():
                             time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
                             px, py, round(th1_cible, 2), round(th4_cible, 2),
                             round(corr1, 2), round(corr2, 2),
-                            round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
+                            round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2)
                         ])
                 except:
                     continue 
 
     sauvegarder_donnees(donnees_a_sauver)
     print(f"Jarvis : Trajectoire terminée. Fichier {NOM_FICHIER_CSV} mis à jour.")
-    tracer_analyse(donnees_a_sauver)
+    #tracer_analyse(donnees_a_sauver)
 
 def executer_cercle():
     essai_id = time.strftime("CERCLE_%H%M%S")
@@ -286,7 +261,10 @@ def executer_cercle():
     
     th1_init, th4_init = cinematique_inverse(centre_x + rayon, centre_y)
     carte_servo1.write(f"S:{th1_init - 7.0}\n".encode())
+    lire_et_afficher(carte_servo1, "COM9 - S1")
     carte_servo2.write(f"S:{th4_init + 9.0}\n".encode())
+    lire_et_afficher(carte_servo2, "COM5 - S2")
+
     print("Jarvis : Mise en position pour le cercle. Attente de stabilisation...")
     time.sleep(2)
     
@@ -328,7 +306,7 @@ def executer_cercle():
 
     sauvegarder_donnees(donnees_a_sauver)
     print(f"Jarvis : Cercle terminé.")
-    tracer_analyse(donnees_a_sauver)
+    #tracer_analyse(donnees_a_sauver)
     
 # --- 8. Interface & Boucle Principale ---
 def interface_saisie():
