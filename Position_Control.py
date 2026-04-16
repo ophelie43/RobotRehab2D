@@ -30,8 +30,8 @@ def cinematique_inverse(xc, yc):
 
 # --- 2. Configuration des Ports Séries ---
 try:
-    carte_servo1 = serial.Serial('COM9', 115200, timeout=0.05)
-    carte_servo2 = serial.Serial('COM5', 115200, timeout=0.05)
+    carte_servo1 = serial.Serial('/dev/tty.usbmodem1101', 115200, timeout=0.05)
+    carte_servo2 = serial.Serial('/dev/tty.usbmodem101', 115200, timeout=0.05)
     print("Jarvis : Connexion aux deux cartes Servo 2040 établie avec succès.")
 except serial.SerialException as e:
     print(f"Jarvis : Erreur matérielle sur les ports COM - {e}")

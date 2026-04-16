@@ -34,6 +34,35 @@ def cinematique_inverse(xc, yc):
     theta4 = 2 * np.atan((-F4 - np.sqrt(max(0, E4**2 + F4**2 - G4**2))) / (G4 - E4)) 
     # Les angles mathématiques purs (pas d'offsets physiques ici !)
     return degrees(theta1), degrees(theta4)
+def jacobien(theta1, theta4):
+    D = (la + lb + lc / 2) / 3
+    r1, r2 = la / D, lb / D
+    s1, s4 = np.sin(theta1), np.sin(theta4)
+    c1, c4 = np.cos(theta1), np.cos(theta4)
+    A = r1 * s1 - r1 * s4
+    B = 2 * (lc / 2) / D + r1 * c1 + r1 * c4
+    C = np.pi / 2 + np.arctan(A / B)
+    D_val = 8 * r2 * np.sqrt(1 - (B * 2 + A * 2) / (4 * r2 ** 2))
+    E = r2 * np.sin(C) / (1 + A * 2 / B * 2) * np.sqrt(1 - (B * 2 + A * 2) / (4 * r2 ** 2))
+    Ep = r2 * np.cos(C) / (1 + A * 2 / B * 2) * np.sqrt(1 - (B * 2 + A * 2) / (4 * r2 ** 2))
+    J11 = -r1 * s1 / 2 - 2 * np.cos(C) * (A * r1 * c1 - B * r1 * s1) / D_val - E / B ** 2 * (B * r1 * c1 + A * r1 * s1)
+    J12 = -r1 * s4 / 2 + 2 * np.cos(C) * (A * r1 * c4 + B * r1 * s4) / D_val - E / B ** 2 * (-B * r1 * c4 + A * r1 * s4)
+    J21 = -r1 * c1 / 2 - 2 * np.sin(C) * (A * r1 * c1 - B * r1 * s1) / D_val + Ep / B ** 2 * (B * r1 * c1 + A * r1 * s1)
+    J22 = -r1 * c4 / 2 + 2 * np.sin(C) * (A * r1 * c4 + B * r1 * s4) / D_val + Ep * B ** 2 * (-B * r1 * c4 + A * r1 * s4)
+    return np.array([[J11, J12], [J21, J22]])
+
+def dynamique(theta1, theta4, tau1, tau2):
+    J_T = np.transpose(jacobien(theta1, theta4))
+    F = np.linalg.solve(J_T, np.array([tau1, tau2]))
+    return F[0], F[1]
+def current_to_torque(current, theta: np.array): 
+    for i in range(1,len(theta)):
+            index = -1 - i
+            if (theta[index] - theta[-1]) != 0:
+                delta_theta = theta[index] - theta[-1]
+                direction = delta_theta/np.abs(delta_theta)
+                break
+    return np.abs((current-0.218)/2.011) * direction
 
 # --- 2. CLASSE PID AVANCÉ (Logique Industrielle / Tustin) ---
 class PIDController:
@@ -108,7 +137,8 @@ def initialiser_csv():
             writer.writerow([
                 "Horodatage", "Essai_ID", "X_Voulu", "Y_Voulu", "Theta1_Cible", "Theta4_Cible",
                 "Correction_M1", "Correction_M2", 
-                "X_Encodeur", "Y_Encodeur", "Theta1_Encodeur", "Theta4_Encodeur", "Courant1", "Courant4"
+                "X_Encodeur", "Y_Encodeur", "Theta1_Encodeur", "Theta4_Encodeur",
+                "Courant1", "Courant4", "Tau1", "Tau4", "Force1", "Force4"
             ])
 
 def sauvegarder_donnees(data_list):
@@ -156,8 +186,10 @@ time.sleep(2)
 offsets_encodeurs = {"COM9 - S1": None, "COM5 - S2": None}
 angles_consigne_init = {"COM9 - S1": 135.0 - 7.0, "COM5 - S2": 45.0 + 9.0}
 angles_reels_calib = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
-angles_actuels = {"COM9 - S1": 135.0, "COM5 - S2": 45.0}
+angles_actuels = {"COM9 - S1": [135.0], "COM5 - S2": [45.0]}
 courants_actuels = {"COM9 - S1": 0.0, "COM5 - S2": 0.0}
+torques_actuels = {"COM9 - S1": 0.0, "COM5 - S2": 0.0}
+forces_actuels = {"COM9 - S1": 0.0, "COM5 - S2": 0.0}
 
 def lire_et_afficher(port, nom_carte):
     global offsets_encodeurs, angles_actuels
@@ -173,8 +205,9 @@ def lire_et_afficher(port, nom_carte):
                 if offsets_encodeurs[nom_carte] is None:
                     offsets_encodeurs[nom_carte] = angle
 
+
                 # L'angle calculé ici est la mathématique pure
-                angles_actuels[nom_carte] = (angle - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte]
+                angles_actuels[nom_carte].append((angle - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte])
                 courants_actuels[nom_carte] = courant
                 
             except: pass
@@ -203,7 +236,7 @@ def executer_trajectoire():
     pid_moteur1.reset()
     pid_moteur2.reset()
     
-    for n in range(1):
+    for n in range(10):
         for i in range(len(sommets) - 1):
             p_depart = sommets[i]
             p_arrivee = sommets[i+1]
@@ -215,12 +248,19 @@ def executer_trajectoire():
                 
                 try:
                     th1_cible, th4_cible = cinematique_inverse(px, py)
-                    ang1_real = angles_actuels["COM9 - S1"]
-                    ang4_real = angles_actuels["COM5 - S2"]
+                    ang1_real = angles_actuels["COM9 - S1"][-1]
+                    ang4_real = angles_actuels["COM5 - S2"][-1]
 
                     #courants_actuels[carte_servo1] = courant
                     current1 = courants_actuels["COM9 - S1"]
                     current4 = courants_actuels["COM5 - S2"]
+
+                    tau1 = current_to_torque(current1, angles_actuels["COM9 - S1"])
+                    tau4 = current_to_torque(current4, angles_actuels["COM5 - S2"])
+
+                    force1, force4 = dynamique(ang1_real, ang4_real,tau1,tau4)
+                    forces_actuels["COM9 - S1"] = force1
+                    forces_actuels["COM5 - S2"] = force4
 
                     corr1 = pid_moteur1.calculer(th1_cible, ang1_real)
                     corr2 = pid_moteur2.calculer(th4_cible, ang4_real)
@@ -241,7 +281,8 @@ def executer_trajectoire():
                             time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
                             px, py, round(th1_cible, 2), round(th4_cible, 2),
                             round(corr1, 2), round(corr2, 2),
-                            round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2)
+                            round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2),
+                            round(tau1, 3), round(tau4, 3), round(force1, 3), round(force4, 3)
                         ])
                 except:
                     continue 
@@ -279,9 +320,20 @@ def executer_cercle():
             
             try:
                 th1_cible, th4_cible = cinematique_inverse(px, py)
-                ang1_real = angles_actuels["COM9 - S1"]
-                ang4_real = angles_actuels["COM5 - S2"]
-                
+                ang1_real = angles_actuels["COM9 - S1"][-1]
+                ang4_real = angles_actuels["COM5 - S2"][-1]
+
+                #courants_actuels[carte_servo1] = courant
+                current1 = courants_actuels["COM9 - S1"]
+                current4 = courants_actuels["COM5 - S2"]
+
+                tau1 = current_to_torque(current1, angles_actuels["COM9 - S1"])
+                tau4 = current_to_torque(current4, angles_actuels["COM5 - S2"])
+
+                force1, force4 = dynamique(ang1_real, ang4_real,tau1,tau4)
+                forces_actuels["COM9 - S1"] = force1
+                forces_actuels["COM5 - S2"] = force4
+
                 corr1 = pid_moteur1.calculer(th1_cible, ang1_real)
                 corr2 = pid_moteur2.calculer(th4_cible, ang4_real)
                 
@@ -289,7 +341,7 @@ def executer_cercle():
                 cmd_th4 = th4_cible + corr2 + 9.0
                 
                 carte_servo1.write(f"S:{cmd_th1}\n".encode())
-                carte_servo2.write(f"S:{cmd_th4}\n".encode())
+                carte_servo2.write(f"S:{cmd_th4}\n".encode())       
                 
                 time.sleep(0.08) # Boucle rapide de 20ms
                 
@@ -299,7 +351,8 @@ def executer_cercle():
                         time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
                         px, py, round(th1_cible, 2), round(th4_cible, 2),
                         round(corr1, 2), round(corr2, 2),
-                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2)
+                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2),
+                        round(tau1, 3), round(tau4, 3), round(force1, 3), round(force4, 3)
                     ])
             except:
                 continue
