@@ -9,8 +9,6 @@ import matplotlib.pyplot as plt
 
 # --- 1. Constantes et Modèle Cinématique ---
 la, lb, lc = 0.27, 0.315, 0.08
-
-dt = 0.08
 NOM_FICHIER_CSV = "/Users/opheliesenechal/Desktop/Bureau - MacBook Pro de Ophélie/UPIR Hiver 2026/Code/rectangle.csv"
 
 def cinematique_directe(theta1, theta4):
@@ -37,10 +35,11 @@ def cinematique_inverse(xc, yc):
     # Les angles mathématiques purs (pas d'offsets physiques ici !)
     return degrees(theta1), degrees(theta4)
 def jacobien(theta1, theta4):
+    t1, t4 = radians(theta1), radians(theta4)
     D = (la + lb + lc / 2) / 3
     r1, r2 = la / D, lb / D
-    s1, s4 = np.sin(theta1), np.sin(theta4)
-    c1, c4 = np.cos(theta1), np.cos(theta4)
+    s1, s4 = np.sin(t1), np.sin(t4)
+    c1, c4 = np.cos(t1), np.cos(t4)
     A = r1 * s1 - r1 * s4
     B = 2 * (lc / 2) / D + r1 * c1 + r1 * c4
     C = np.pi / 2 + np.arctan(A / B)
@@ -55,25 +54,44 @@ def jacobien(theta1, theta4):
     return np.array([[J11, J12], [J21, J22]])
 
 def dynamique(theta1, theta4, tau1, tau2):
+    # Sécurité : Si tau est None ou invalide, on ne calcule pas
+    if tau1 is None or tau2 is None:
+        return 0.0, 0.0
+        
     J = jacobien(theta1, theta4)
     detJ = np.linalg.det(J)
-    if np.abs(detJ) < 1e-2: # Seuil d'instabilité
+    
+    if np.abs(detJ) < 1e-3:
         return 0.0, 0.0
     else:
-        J_T = np.transpose(J)
-        F = np.linalg.solve(J_T, np.array([tau1, tau2]))
-        return F[0], F[1]
-def current_to_torque(current, theta: np.array, nom_carte): 
-    for i in range(1,len(theta)):
+        try:
+            J_T = np.transpose(J)
+            # On force la conversion en float64 pour éviter l'erreur de type 'O'
+            F = np.linalg.solve(J_T, np.array([tau1, tau2]))
+            return F[0], F[1]
+        except:
+            return 0.0, 0.0
+def current_to_torque(current, theta): 
+    direction = 1.0
+    # On vérifie qu'on a assez de points pour calculer une direction
+    if len(theta) > 2:
+         for i in range(1,len(theta)):
             index = -1 - i
             if (theta[index] - theta[-1]) != 0:
                 delta_theta = theta[index] - theta[-1]
                 direction = delta_theta/np.abs(delta_theta)
                 break
-    if nom_carte == "COM9 - S1":
-        return np.abs((current-0.62)/0.92) * direction
-    if nom_carte == "COM5- S2":
-        return np.abs((current-0.218)/2.011) * direction
+    
+    try:
+        return np.abs((float(current) - 0.62) / 0.92) * direction
+        # if nom_carte == "COM9 - S1":
+        #     return np.abs((float(current) - 0.62) / 0.92) * direction
+        # if nom_carte == "COM5 - S2":
+        #     return np.abs((float(current) - 0.218) / 2.011) * direction
+    except:
+        return 0.0  # Retourne 0 si le calcul échoue
+    
+    return 0.0 # Retourne 0 si le nom de la carte est faux
 
 # --- 2. CLASSE PID AVANCÉ (Logique Industrielle / Tustin) ---
 class PIDController:
@@ -149,7 +167,7 @@ class AdmittanceController:
             dt = 0.001
         
         #Calcul de l'erreur de force
-        Fe = consigne - valeur_mesurée
+        Fe =  valeur_mesurée -  consigne
 
         # 1. Action proportionnelle
         Pn = (1/self.De) * Fe
@@ -158,7 +176,7 @@ class AdmittanceController:
         In = self.Ki * Fe * dt
 
         # 3. Sortie
-        vr = Pn + In
+        vr =   Pn
         return vr
 class LowPassFilter:
     def __init__(self, f_cutoff, dt):
@@ -169,7 +187,6 @@ class LowPassFilter:
         filtered_val = (1 - self.alpha) * self.last_val + self.alpha * val
         self.last_val = filtered_val
         return filtered_val
-
 # Initialisation des deux PID (Gains ajustés pour un mouvement calme et précis)
 pid_moteur1 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
 pid_moteur2 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
@@ -177,8 +194,9 @@ pid_moteur2 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=1
 admitance_moteur1 = AdmittanceController(De = 1.0, Ki = 1.0)
 admitance_moteur2 = AdmittanceController(De = 1.0, Ki = 1.0)
 
-lp_f1 = LowPassFilter(f_cutoff = 5.0, dt = dt)
-lp_f4 = LowPassFilter(f_cutoff = 5.0, dt = dt)
+lp_f1 = LowPassFilter(f_cutoff = 2.0, dt = 0.08)
+lp_f4 = LowPassFilter(f_cutoff = 2.0, dt = 0.08)
+
 # --- 3. Fonctions CSV ---
 def initialiser_csv():
     if not os.path.exists(NOM_FICHIER_CSV):
@@ -327,7 +345,7 @@ def executer_trajectoire():
                     carte_servo2.write(f"S:{cmd_th4}\n".encode())
                     
 
-
+                    print(f"DEBUG: Angles={ang1_real:.2f}/{ang4_real:.2f} | DetJ={detJ:.6f} | F={force1:.2f}/{force4:.2f}")
                     time.sleep(0.08) # Boucle rapide de 80ms
                     
                     rx, ry = cinematique_directe(ang1_real, ang4_real)
@@ -344,35 +362,37 @@ def executer_trajectoire():
 
     sauvegarder_donnees(donnees_a_sauver)
     print(f"Jarvis : Trajectoire terminée. Fichier {NOM_FICHIER_CSV} mis à jour.")
-    # tracer_analyse(donnees_a_sauver)
-
+    tracer_analyse(donnees_a_sauver)
 
 def executer_cercle():
     essai_id = 0
     centre_x, centre_y = 0.0, 0.35 
     rayon = 0.1 
-    nb_points = 200 # Plus de points pour garder une vitesse constante
+    nb_points = 200 
     donnees_a_sauver = []
     
-    print(f"\nJarvis : Génération cercle avec PID (Essai {essai_id})...")
+    print(f"\nJarvis : Génération cercle (Essai {essai_id})...")
     
+    # Positionnement initial
     th1_init, th4_init = cinematique_inverse(centre_x + rayon, centre_y)
     carte_servo1.write(f"S:{th1_init - 7.0}\n".encode())
-    lire_et_afficher(carte_servo1, "COM9 - S1")
     carte_servo2.write(f"S:{th4_init + 9.0}\n".encode())
-    lire_et_afficher(carte_servo2, "COM5 - S2")
-
-    print("Jarvis : Mise en position pour le cercle. Attente de stabilisation...")
+    
+    print("Jarvis : Attente de stabilisation...")
     time.sleep(2)
+    
+    # Vidage des vieux messages accumulés pendant l'attente
     carte_servo1.reset_input_buffer()
     carte_servo2.reset_input_buffer()
-
+    
     pid_moteur1.reset()
     pid_moteur2.reset()
-    
-    for n in range(1):
+    for _ in range(3):
         essai_id = 0
         for i in range(nb_points + 1):
+            # --- SYNCHRONISATION CRITIQUE ---
+            # On attend d'avoir au moins une nouvelle donnée de chaque moteur
+            # Cela évite de calculer sur des vieilles positions
             timeout = time.time() + 0.5
             while (carte_servo1.in_waiting == 0 or carte_servo2.in_waiting == 0) and time.time() < timeout:
                 time.sleep(0.001)
@@ -382,7 +402,7 @@ def executer_cercle():
                 lire_et_afficher(carte_servo1, "COM9 - S1")
             while carte_servo2.in_waiting > 0:
                 lire_et_afficher(carte_servo2, "COM5 - S2")
-
+                
             angle_cercle = (2 * np.pi * i) / nb_points
             px = centre_x + rayon * np.cos(angle_cercle)
             py = centre_y + rayon * np.sin(angle_cercle)
@@ -390,36 +410,186 @@ def executer_cercle():
             
             try:
                 th1_cible, th4_cible = cinematique_inverse(px, py)
-
+                
                 # Sécurité : on vérifie que les listes ne sont pas vides
                 if not angles_actuels["COM9 - S1"] or not angles_actuels["COM5 - S2"]:
                     continue
 
                 ang1_real = angles_actuels["COM9 - S1"][-1]
                 ang4_real = angles_actuels["COM5 - S2"][-1]
-
-                #courants_actuels[carte_servo1] = courant
                 current1 = courants_actuels["COM9 - S1"]
                 current4 = courants_actuels["COM5 - S2"]
 
-                tau1 = current_to_torque(current1, angles_actuels["COM9 - S1"], "COM0 - S1")
-                tau4 = current_to_torque(current4, angles_actuels["COM5 - S2"], "COM5 - S2")
+                # Note : Assure-toi que current_to_torque gère le cas où delta_theta est nul !
+                tau1 = current_to_torque(current1, np.array(angles_actuels["COM9 - S1"]), "COM9 - S1")
+                tau4 = current_to_torque(current4, np.array(angles_actuels["COM5 - S2"]), "COM5 - S2")
 
-                force1, force4 = dynamique(ang1_real, ang4_real,tau1,tau4)
-
-                forces_actuels["COM9 - S1"] = force1
-                forces_actuels["COM5 - S2"] = force4
-
+                force1, force4 = dynamique(ang1_real, ang4_real, tau1, tau4)
+                
                 corr1 = pid_moteur1.calculer(th1_cible, ang1_real)
                 corr2 = pid_moteur2.calculer(th4_cible, ang4_real)
                 
+                J = jacobien(ang1_real, ang4_real)
+                detJ = np.linalg.det(J)
+
                 cmd_th1 = th1_cible + corr1 - 7.0
                 cmd_th4 = th4_cible + corr2 + 9.0
 
+                # Envoi des commandes
                 carte_servo1.write(f"S:{cmd_th1}\n".encode())
-                carte_servo2.write(f"S:{cmd_th4}\n".encode())  
+                carte_servo2.write(f"S:{cmd_th4}\n".encode())       
+                print(f"DEBUG: Angles={ang1_real:.2f}/{ang4_real:.2f} | DetJ={detJ:.6f} | F={force1:.2f}/{force4:.2f}")
+                # Enregistrement des données
+                rx, ry = cinematique_directe(ang1_real, ang4_real)
+                if rx is not None:
+                    donnees_a_sauver.append([
+                        time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
+                        px, py, round(th1_cible, 2), round(th4_cible, 2),
+                        round(corr1, 2), round(corr2, 2),
+                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), 
+                        round(current1, 4), round(current4, 4),
+                        round(tau1, 3), round(tau4, 3), round(force1, 3), round(force4, 3),round(detJ, 4)
+                    ])
+                    
+                # Un sleep court suffit car l'attente du `while` synchronise déjà
+                time.sleep(0.08) 
 
-                J = jacobien(ang1_real, ang4_real)
-                detJ = np.linalg.det(J)
-                
-                time.sleep
+            except Exception as e:
+                print(f"Erreur au point {i}: {e}")
+                continue
+
+    sauvegarder_donnees(donnees_a_sauver)
+    print(f"Jarvis : Cercle terminé. {len(donnees_a_sauver)} points enregistrés.")
+
+
+def admittance_control():
+    # --- Configuration ---
+    essai_id = 0
+    dt = 0.08
+    force_threshold = 0.5  # Seuil de zone morte (Newtons)
+    max_cartesian_speed = 0.05 # m/s
+    
+    # Paramètres du modèle de frottement (à ajuster selon ton robot)
+    # tau_model = fc * sign(q_dot) + fv * q_dot
+    fc = 0.1  # Frottement sec
+    fv = 0.05 # Frottement visqueux
+    
+    donnees_a_sauver = []
+    
+    # 0. Initialisation
+    print(f"\nJarvis : Homing initial...")
+    # On commence au centre de l'espace de travail
+    x_curr, y_curr = 0.0, 0.35
+    th1_init, th4_init = cinematique_inverse(x_curr, y_curr)
+    
+    # Variables d'état pour le calcul des vitesses
+    q_prev = np.array([th1_init, th4_init])
+    x_cmd = np.array([x_curr, y_curr])
+    
+    carte_servo1.write(f"S:{th1_init - 7.0}\n".encode())
+    carte_servo2.write(f"S:{th4_init + 9.0}\n".encode())
+    time.sleep(2)
+
+    carte_servo1.reset_input_buffer()
+    carte_servo2.reset_input_buffer()
+    
+    print("Jarvis : Mode Admittance Actif. Poussez le bras.")
+
+    while True: # Boucle de contrôle principale
+        try:
+            # 1. Read robot state (Sync)
+            timeout = time.time() + 0.5
+            while (carte_servo1.in_waiting == 0 or carte_servo2.in_waiting == 0) and time.time() < timeout:
+                time.sleep(0.001)
+
+            while carte_servo1.in_waiting > 0: lire_et_afficher(carte_servo1, "COM9 - S1")
+            while carte_servo2.in_waiting > 0: lire_et_afficher(carte_servo2, "COM5 - S2")
+
+            q_curr = np.array([angles_actuels["COM9 - S1"][-1], angles_actuels["COM5 - S2"][-1]])
+            
+            # Estimation des vitesses articulaires (q_dot)
+            q_dot = (q_curr - q_prev) / dt
+            q_prev = q_curr
+            
+            i_meas = np.array([courants_actuels["COM9 - S1"], courants_actuels["COM5 - S2"]])
+
+            # 2. Current-to-torque estimate (via tes fonctions existantes)
+            tau_meas_1 = current_to_torque(i_meas[0], angles_actuels["COM9 - S1"])
+            tau_meas_2 = current_to_torque(i_meas[1], angles_actuels["COM5 - S2"])
+            tau_meas = np.array([tau_meas_1, tau_meas_2])
+
+            # 3. Internal torque model (Frottements)
+            # Simplification : b est souvent négligé si le robot est équilibré
+            tau_model = fc * np.sign(q_dot) + fv * q_dot
+
+            # 4. External torque estimate
+            tau_ext = tau_meas - tau_model
+
+            # 5. Convert joint torque to end-effector force
+            # F = inv(J^T) * tau
+            ang1_rad, ang4_rad = q_curr[0], q_curr[1]
+            force_brut_1, force_brut_2 = dynamique(ang1_rad, ang4_rad, tau_ext[0], tau_ext[1])
+            f_ext = np.array([force_brut_1, force_brut_2])
+
+            # 6. Filter and Deadband
+            f_ext_filtered_1 = lp_f1.update(f_ext[0])
+            f_ext_filtered_2 = lp_f4.update(f_ext[1])
+            f_ext_filtered = np.array([f_ext_filtered_1, f_ext_filtered_2])
+            
+            # Application de la zone morte (Deadband)
+            for j in range(2):
+                if abs(f_ext_filtered[j]) < force_threshold:
+                    f_ext_filtered[j] = 0.0
+
+            # 7. Admittance law (Cartésien)
+            # x_dot_cmd = (1/De) * F_ext + Ki * integral(F_ext)
+            # Ici on utilise tes contrôleurs d'admittance par axe
+            vx = admitance_moteur1.calculer(0, f_ext_filtered[0])
+            vy = admitance_moteur2.calculer(0, f_ext_filtered[1])
+            v_cmd = np.array([vx, vy])
+            
+            # Limiter la vitesse max pour la sécurité
+            norm_v = np.linalg.norm(v_cmd)
+            if norm_v > max_cartesian_speed:
+                v_cmd = (v_cmd / norm_v) * max_cartesian_speed
+
+            # 8. Integrate desired Cartesian position
+            x_cmd = x_cmd + (v_cmd * dt)
+            
+            # Sécurité : Limites de l'espace de travail (exemple simple)
+            x_cmd[0] = np.clip(x_cmd[0], -0.2, 0.2)
+            x_cmd[1] = np.clip(x_cmd[1], 0.2, 0.45)
+
+            # 9. Convert to motor position commands
+            th1_cmd, th4_cmd = cinematique_inverse(x_cmd[0], x_cmd[1])
+
+            # 10. Send commands
+            carte_servo1.write(f"S:{th1_cmd - 7.0}\n".encode())
+            carte_servo2.write(f"S:{th4_cmd + 9.0}\n".encode())
+
+            # Log des données
+            essai_id += 1
+            donnees_a_sauver.append([
+                time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
+                x_cmd[0], x_cmd[1], round(th1_cmd, 2), round(th4_cmd, 2),
+                0, 0, # Pas de PID correction ici car on commande en position directe
+                round(q_curr[0], 2), round(q_curr[1], 2), 
+                round(f_ext_filtered[0], 3), round(f_ext_filtered[1], 3)
+            ])
+            
+            time.sleep(dt)
+
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Erreur boucle admittance: {e}")
+            continue
+
+    sauvegarder_donnees(donnees_a_sauver)
+    print("Jarvis : Mode Admittance arrêté.")
+# --- 8. Interface & Boucle Principale ---
+# --- 8. Interface & Boucle Principale ---
+def interface_saisie():
+    time.sleep(3) 
+    while True:
+        entree = input("\nJarvis : 'GO' (carré), 'CERCL

@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 # --- CONFIGURATION ---
-CHEMIN_CSV = "1rectangle_force_externe_MODIFIÉ.csv"
+CHEMIN_CSV = "rectangle.csv"
 def generer_rapport_visuel(chemin_fichier):
     if not os.path.exists(chemin_fichier):
         print(f"Erreur : Le fichier {chemin_fichier} est introuvable.")
@@ -27,6 +27,8 @@ def generer_rapport_visuel(chemin_fichier):
     tours_YR = np.split(df['Y_Encodeur'].values, points_de_coupure)
     tours_FX = np.split(df['Force1'].values, points_de_coupure)
     tours_FY = np.split(df['Force4'].values, points_de_coupure)
+    # tours_FX_Filtree = np.split(df['Force1_Filtree'].values, points_de_coupure)
+    # tours_FY_Filtree = np.split(df['Force4_Filtree'].values, points_de_coupure)
     tours_detJ = np.split(df['Jacobien'].values, points_de_coupure)
     tours_torque1 = np.split(df['Tau1'].values, points_de_coupure)
     tours_torque4 = np.split(df['Tau4'].values, points_de_coupure)
@@ -53,15 +55,15 @@ def generer_rapport_visuel(chemin_fichier):
     ax_detJ.grid(True, alpha=0.3)
     ax_detJ.axhline(0, color='black', linewidth=0.8, linestyle='--')
 
-    ax_torque.set_title("Couple pour theta 1", fontweight='bold')
+    ax_torque.set_title("Force X Filtree", fontweight='bold')
     ax_torque.grid(True, alpha=0.3)
     ax_torque.axhline(0, color='black', linewidth=0.8, linestyle='--')
-    ax_torque.set_ylabel("Couple [N.m]")
+    ax_torque.set_ylabel("Force [N]")
 
-    ax_theta.set_title("Couple pour theta 4", fontweight = 'bold')
+    ax_theta.set_title("Force Y Filtre", fontweight = 'bold')
     ax_theta.grid(True, alpha = 0.3)
     ax_theta.axhline(0, color='black', linewidth=0.8, linestyle='--')
-    ax_theta.set_ylabel("Couple [N.m]")
+    ax_theta.set_ylabel("Force [N]")
 
     # 3. Tracé de la consigne (Background)
     ax1.plot(df['X_Voulu'], df['Y_Voulu'], 'b--', label='Cible (Voulue)', linewidth=1, alpha=0.3)
@@ -74,6 +76,8 @@ def generer_rapport_visuel(chemin_fichier):
         yr = tours_YR[i]
         fx = tours_FX[i]
         fy = tours_FY[i]
+        # fx_f = tours_FX_Filtree[i]
+        # fy_f = tours_FY_Filtree[i]
         dj = tours_detJ[i]
         t1 = tours_torque1[i]
         t4 = tours_torque4[i]
@@ -104,7 +108,7 @@ def generer_rapport_visuel(chemin_fichier):
         vecteur_rouge = np.full_like(dj, np.nan)
         vecteur_rouge[masque] = dj[masque]
         
-        ax_detJ.scatter(indices_local, vecteur_rouge, color=couleur, s=10, zorder=5)
+        ax_detJ.scatter(indices_local, dj, color=couleur, s=10, zorder=5)
 
         ax_theta.plot(indices_local, t4, color = couleur, alpha = 0.8)
     # 5. Finalisation
@@ -121,11 +125,4 @@ def generer_rapport_visuel(chemin_fichier):
                               markerfacecolor='red', markersize=5)
     handles, labels = ax_detJ.get_legend_handles_labels()
     handles.append(securite_legende)
-    ax_detJ.legend(handles=handles, loc='upper right', fontsize='7')
-
-    plt.tight_layout()
-    print(f"Jarvis : Analyse terminée. {len(tours_XR)} tours détectés.")
-    plt.show()
-
-if __name__ == "__main__":
-    generer_rapport_visuel(CHEMIN_CSV)
+    ax_detJ.legend(handles=handles, loc='upper right', fontsize='
