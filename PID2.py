@@ -592,4 +592,37 @@ def admittance_control():
 def interface_saisie():
     time.sleep(3) 
     while True:
-        entree = input("\nJarvis : 'GO' (carré), 'CERCL
+        entree = input("\nJarvis : 'GO' (carré), 'CERCLE', 'ADMITTANCE' ou 'X Y' : ").strip().upper()
+        if entree == "GO":
+            executer_trajectoire()
+        elif entree == "CERCLE":
+            executer_cercle()
+        elif entree == 'ADMITTANCE':
+            admittance_control()
+        elif entree:
+            try:
+                c = entree.split()
+                if len(c) == 2:
+                    th1, th4 = cinematique_inverse(float(c[0]), float(c[1]))
+                    carte_servo1.write(f"S:{th1 - 7.0}\n".encode())
+                    carte_servo2.write(f"S:{th4 + 9.0}\n".encode())
+            except: pass
+threading.Thread(target=interface_saisie, daemon=True).start()
+    
+try:
+    initialiser_csv()
+    print("\nJarvis : Système prêt.")
+    carte_servo1.write(f"S:{angles_consigne_init['COM9 - S1']}\n".encode())
+    carte_servo2.write(f"S:{angles_consigne_init['COM5 - S2']}\n".encode())
+    time.sleep(2)
+    
+    carte_servo1.reset_input_buffer()
+    carte_servo2.reset_input_buffer()
+    
+    while True:
+        # lire_et_afficher(carte_servo1, "COM9 - S1")
+        # lire_et_afficher(carte_servo2, "COM5 - S2")
+        time.sleep(0.005)
+
+except KeyboardInterrupt:
+    print("\nFermeture."); carte_servo1.close(); carte_servo2.close()

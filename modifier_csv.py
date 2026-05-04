@@ -76,4 +76,23 @@ CHEMIN_CSV = "PID/CSV/10cercles_barre.csv"
 # 1. Chargement des données
 df = pd.read_csv(CHEMIN_CSV)
 results = df.apply(calcul_dynamique, axis=1)
-df['Force1'], df['Force4'], df['Jacobien'] = zip(*result
+df['Force1'], df['Force4'], df['Jacobien'] = zip(*results) 
+dt_lab = 0.08  # Ton intervalle de temps (80ms selon ton code précédent)
+fc = 2.0       # Fréquence de coupure à 5Hz (à ajuster selon le bruit)
+
+df = appliquer_filtre_df(df, fc, dt_lab)
+ids = df['Essai_ID'].values
+
+
+#df['Tau1'] = df['Tau1']/np.abs(df['Tau1']) * np.abs((df['Courant1']-0.62)/0.92)
+
+
+new_file_name = CHEMIN_CSV.split('.')[0] + '_MODIFIÉ.csv'
+# for i in range(len(ids)):
+#     if np.abs(tours_detJ[i]) < 0.05:
+#         df.at[i, 'Force1'] = 0
+#         df.at[i, 'Force4'] = 0
+#         df.at[i, 'Tau1'] = 0
+#         df.at[i, 'Tau4'] = 0
+df.to_csv(new_file_name, index= False)
+print("✅ fichier csv modifié")

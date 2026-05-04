@@ -125,4 +125,11 @@ def generer_rapport_visuel(chemin_fichier):
                               markerfacecolor='red', markersize=5)
     handles, labels = ax_detJ.get_legend_handles_labels()
     handles.append(securite_legende)
-    ax_detJ.legend(handles=handles, loc='upper right', fontsize='
+    ax_detJ.legend(handles=handles, loc='upper right', fontsize='7')
+
+    plt.tight_layout()
+    print(f"Jarvis : Analyse terminée. {len(tours_XR)} tours détectés.")
+    plt.show()
+
+if __name__ == "__main__":
+    generer_rapport_visuel(CHEMIN_CSV)

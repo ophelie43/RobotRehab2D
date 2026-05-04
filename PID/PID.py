@@ -422,4 +422,161 @@ def executer_cercle():
                 J = jacobien(ang1_real, ang4_real)
                 detJ = np.linalg.det(J)
                 
-                time.sleep
+                time.sleep(0.08) # Boucle rapide de 20ms
+                
+                rx, ry = cinematique_directe(ang1_real, ang4_real)
+                if rx is not None:
+                    donnees_a_sauver.append([
+                        time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
+                        px, py, round(th1_cible, 2), round(th4_cible, 2),
+                        round(corr1, 2), round(corr2, 2),
+                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2),
+                        round(tau1, 3), round(tau4, 3), round(force1, 3), round(force4, 3), round(detJ, 4)
+                    ])
+            except:
+                continue
+
+    sauvegarder_donnees(donnees_a_sauver)
+    print(f"Jarvis : Cercle terminé. {len(donnees_a_sauver)} points enregistrés.")
+    # tracer_analyse(donnees_a_sauver)
+    
+def admittance_control():
+    essai_id = 0
+    centre_x, centre_y = 0.0, 0.35 
+    rayon = 0.1 
+    nb_points = 200 # Plus de points pour garder une vitesse constante
+    donnees_a_sauver = []
+    
+    print(f"\nJarvis : Position initiale (Essai {essai_id})...")
+    
+    th1_init, th4_init = cinematique_inverse(centre_x + rayon, centre_y)
+    carte_servo1.write(f"S:{th1_init - 7.0}\n".encode())
+    carte_servo2.write(f"S:{th4_init + 9.0}\n".encode())
+
+    print("Jarvis : Attente de stabilisation...")
+    time.sleep(2)
+
+    carte_servo1.reset_input_buffer()
+    carte_servo2.reset_input_buffer()
+
+    th1_cible, th4_cible = th1_init, th4_init
+    print("Jarvis : Mise en position pour le cercle. Attente de stabilisation...")
+    time.sleep(2)
+    
+    pid_moteur1.reset()
+    pid_moteur2.reset()
+    
+    for _ in range(1):
+        essai_id = 0
+        for i in range(nb_points + 1):
+
+            timeout = time.time() + 0.5
+            while (carte_servo1.in_waiting == 0 or carte_servo2.in_waiting == 0) and time.time() < timeout:
+                time.sleep(0.001)
+
+            # On lit toutes les données disponibles pour avoir la plus récente
+            while carte_servo1.in_waiting > 0:
+                lire_et_afficher(carte_servo1, "COM9 - S1")
+
+            while carte_servo2.in_waiting > 0:
+                lire_et_afficher(carte_servo2, "COM5 - S2")
+
+            ang1_real = angles_actuels["COM9 - S1"][-1]
+            ang4_real = angles_actuels["COM5 - S2"][-1]
+
+            #courants_actuels[carte_servo1] = courant
+            current1 = courants_actuels["COM9 - S1"]
+            current4 = courants_actuels["COM5 - S2"]
+
+            tau1 = current_to_torque(current1, angles_actuels["COM9 - S1"])
+            tau4 = current_to_torque(current4, angles_actuels["COM5 - S2"])
+
+            force1_brut, force4_brut = dynamique(ang1_real, ang4_real,tau1,tau4)
+            force1_clean = lp_f1.update(force1_brut)
+            force4_clean = lp_f4.update(force4_brut)
+
+            forces_actuels["COM9 - S1"] = force1_clean
+            forces_actuels["COM5 - S2"] = force4_clean
+
+            v1 = admitance_moteur1.calculer(0, force1_clean)
+            v4 = admitance_moteur2.calculer(0, force4_clean)
+            th1_cible = th1_cible + (v1 * dt) 
+            th4_cible = th4_cible + (v4 * dt)
+            essai_id += 1
+            
+            try:
+
+
+
+                cmd_th1 = th1_cible - 7.0
+                cmd_th4 = th4_cible + 9.0
+                # Sécurité : on vérifie que les listes ne sont pas vides
+                if not angles_actuels["COM9 - S1"] or not angles_actuels["COM5 - S2"]:
+                    continue
+                px, py = cinematique_directe(cmd_th1, cmd_th4)
+                
+                J = jacobien(ang1_real, ang4_real)
+                detJ = np.linalg.det(J)
+                
+                carte_servo1.write(f"S:{cmd_th1}\n".encode())
+                carte_servo2.write(f"S:{cmd_th4}\n".encode())       
+                
+                time.sleep(dt)
+                
+                rx, ry = cinematique_directe(ang1_real, ang4_real)
+                if rx is not None:
+                    donnees_a_sauver.append([
+                        time.strftime("%Y-%m-%d %H:%M:%S"), essai_id,
+                        px, py, round(th1_cible, 2), round(th4_cible, 2),
+                        round(th1_cible, 2), round(th4_cible, 2),
+                        round(rx, 4), round(ry, 4), round(ang1_real, 2), round(ang4_real, 2), round(current1, 2), round(current4, 2),
+                        round(tau1, 3), round(tau4, 3), round(force1_clean, 3), round(force4_clean, 3), round(detJ, 4)
+                    ])
+            except:
+                continue
+
+    sauvegarder_donnees(donnees_a_sauver)
+    print(f"Jarvis : Cercle terminé.")
+    tracer_analyse(donnees_a_sauver)
+# --- 8. Interface & Boucle Principale ---
+def interface_saisie():
+    time.sleep(3) 
+    while True:
+        entree = input("\nJarvis : 'GO' (carré), 'CERCLE', 'ADMITTANCE' ou 'X Y' : ").strip().upper()
+        if entree == "GO":
+            executer_trajectoire()
+        elif entree == "CERCLE":
+            executer_cercle()
+        elif entree == 'ADMITTANCE':
+            admittance_control()
+        elif entree:
+            try:
+                c = entree.split()
+                if len(c) == 2:
+                    th1, th4 = cinematique_inverse(float(c[0]), float(c[1]))
+                    carte_servo1.write(f"S:{th1 - 7.0}\n".encode())
+                    carte_servo2.write(f"S:{th4 + 9.0}\n".encode())
+            except: pass
+
+threading.Thread(target=interface_saisie, daemon=True).start()
+    
+try:
+    initialiser_csv()
+    print("\nJarvis : Système prêt.")
+    carte_servo1.write(f"S:{angles_consigne_init['COM9 - S1']}\n".encode())
+    carte_servo2.write(f"S:{angles_consigne_init['COM5 - S2']}\n".encode())
+    time.sleep(2)
+    
+    carte_servo1.reset_input_buffer()
+    carte_servo2.reset_input_buffer()
+    
+    while True:
+        try: 
+            lire_et_afficher(carte_servo1, "COM9 - S1")
+            lire_et_afficher(carte_servo2, "COM5 - S2")
+        except:
+                pass
+        time.sleep(0.005)
+
+except KeyboardInterrupt:
+    print("\nFermeture."); carte_servo1.close(); carte_servo2.close()
