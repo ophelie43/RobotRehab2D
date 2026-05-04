@@ -176,7 +176,7 @@ class AdmittanceController:
         In = self.Ki * Fe * dt
 
         # 3. Sortie
-        vr =   Pn
+        vr =   Pn 
         return vr
 class LowPassFilter:
     def __init__(self, f_cutoff, dt):
@@ -362,7 +362,7 @@ def executer_trajectoire():
 
     sauvegarder_donnees(donnees_a_sauver)
     print(f"Jarvis : Trajectoire terminée. Fichier {NOM_FICHIER_CSV} mis à jour.")
-    tracer_analyse(donnees_a_sauver)
+    # tracer_analyse(donnees_a_sauver)
 
 def executer_cercle():
     essai_id = 0
@@ -505,65 +505,65 @@ def admittance_control():
             while carte_servo1.in_waiting > 0: lire_et_afficher(carte_servo1, "COM9 - S1")
             while carte_servo2.in_waiting > 0: lire_et_afficher(carte_servo2, "COM5 - S2")
 
+            # 1. Lecture des positions actuels des moteurs
             q_curr = np.array([angles_actuels["COM9 - S1"][-1], angles_actuels["COM5 - S2"][-1]])
             
-            # Estimation des vitesses articulaires (q_dot)
+            # 2. Estimation des vitesses articulaires (q_dot)
             q_dot = (q_curr - q_prev) / dt
             q_prev = q_curr
             
+            # 3. Lecture du courant des moteurs
             i_meas = np.array([courants_actuels["COM9 - S1"], courants_actuels["COM5 - S2"]])
 
-            # 2. Current-to-torque estimate (via tes fonctions existantes)
+            # 4. Conversion couple en courant
             tau_meas_1 = current_to_torque(i_meas[0], angles_actuels["COM9 - S1"])
             tau_meas_2 = current_to_torque(i_meas[1], angles_actuels["COM5 - S2"])
             tau_meas = np.array([tau_meas_1, tau_meas_2])
 
-            # 3. Internal torque model (Frottements)
+            # 5. Modèl interne du moment de force (Frottements)
             # Simplification : b est souvent négligé si le robot est équilibré
             tau_model = fc * np.sign(q_dot) + fv * q_dot
 
-            # 4. External torque estimate
+            # 6. Moment de force de l'extérieur
             tau_ext = tau_meas - tau_model
 
-            # 5. Convert joint torque to end-effector force
+            # 8. Convertir le moment de force des moteurs en force
             # F = inv(J^T) * tau
-            ang1_rad, ang4_rad = q_curr[0], q_curr[1]
-            force_brut_1, force_brut_2 = dynamique(ang1_rad, ang4_rad, tau_ext[0], tau_ext[1])
+            force_brut_1, force_brut_2 = dynamique(q_curr[0], q_curr[1], tau_ext[0], tau_ext[1])
             f_ext = np.array([force_brut_1, force_brut_2])
 
-            # 6. Filter and Deadband
+            # 9. Filtre passe-bas pour la force
             f_ext_filtered_1 = lp_f1.update(f_ext[0])
             f_ext_filtered_2 = lp_f4.update(f_ext[1])
             f_ext_filtered = np.array([f_ext_filtered_1, f_ext_filtered_2])
             
-            # Application de la zone morte (Deadband)
+            # 10. Application de la zone morte (Deadband)
             for j in range(2):
                 if abs(f_ext_filtered[j]) < force_threshold:
                     f_ext_filtered[j] = 0.0
 
-            # 7. Admittance law (Cartésien)
+            # 11. Contrôle par admittance (Cartésien)
             # x_dot_cmd = (1/De) * F_ext + Ki * integral(F_ext)
-            # Ici on utilise tes contrôleurs d'admittance par axe
             vx = admitance_moteur1.calculer(0, f_ext_filtered[0])
             vy = admitance_moteur2.calculer(0, f_ext_filtered[1])
             v_cmd = np.array([vx, vy])
             
-            # Limiter la vitesse max pour la sécurité
+            # 12. Limiter la vitesse max pour la sécurité
             norm_v = np.linalg.norm(v_cmd)
             if norm_v > max_cartesian_speed:
                 v_cmd = (v_cmd / norm_v) * max_cartesian_speed
 
-            # 8. Integrate desired Cartesian position
+            # 13. Integrate desired Cartesian position
             x_cmd = x_cmd + (v_cmd * dt)
             
-            # Sécurité : Limites de l'espace de travail (exemple simple)
+            # 14. Sécurité : Limites de l'espace de travail (exemple simple)
             x_cmd[0] = np.clip(x_cmd[0], -0.2, 0.2)
             x_cmd[1] = np.clip(x_cmd[1], 0.2, 0.45)
 
-            # 9. Convert to motor position commands
+            # 15. Convert to motor position commands
             th1_cmd, th4_cmd = cinematique_inverse(x_cmd[0], x_cmd[1])
 
-            # 10. Send commands
+            # 16. Send commands
             carte_servo1.write(f"S:{th1_cmd - 7.0}\n".encode())
             carte_servo2.write(f"S:{th4_cmd + 9.0}\n".encode())
 
