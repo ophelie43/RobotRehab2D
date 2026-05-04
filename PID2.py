@@ -153,9 +153,10 @@ class PIDController:
         self.Dn_1 = 0.0
         self.dernier_temps = time.time()
 class AdmittanceController:
-    def __init__(self, De, Ki, limite_sortie = 5.0):
+    def __init__(self, De, Ki, Bd, limite_sortie = 5.0):
         self.De = De
         self.Ki = Ki
+        self.Bd = Bd
         self.limite_sortie = limite_sortie
 
         # Variables d'état
@@ -176,7 +177,7 @@ class AdmittanceController:
         In = self.Ki * Fe * dt
 
         # 3. Sortie
-        vr =   Pn 
+        vr =   Pn + In
         return vr
 class LowPassFilter:
     def __init__(self, f_cutoff, dt):
@@ -191,8 +192,8 @@ class LowPassFilter:
 pid_moteur1 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
 pid_moteur2 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
 
-admitance_moteur1 = AdmittanceController(De = 1.0, Ki = 1.0)
-admitance_moteur2 = AdmittanceController(De = 1.0, Ki = 1.0)
+admitance_moteur1 = AdmittanceController(De = 0.8, Ki = 0.0)
+admitance_moteur2 = AdmittanceController(De = 0.8, Ki = 0.0)
 
 lp_f1 = LowPassFilter(f_cutoff = 2.0, dt = 0.08)
 lp_f4 = LowPassFilter(f_cutoff = 2.0, dt = 0.08)
@@ -274,7 +275,6 @@ def lire_et_afficher(port, nom_carte):
                     offsets_encodeurs[nom_carte] = angle
 
 
-                # L'angle calculé ici est la mathématique pure
                 angles_actuels[nom_carte].append((angle - offsets_encodeurs[nom_carte]) + angles_reels_calib[nom_carte])
                 courants_actuels[nom_carte] = courant
                 
@@ -465,9 +465,9 @@ def executer_cercle():
 def admittance_control():
     # --- Configuration ---
     essai_id = 0
-    dt = 0.08
+    dt = 0.02
     force_threshold = 0.5  # Seuil de zone morte (Newtons)
-    max_cartesian_speed = 0.05 # m/s
+    max_cartesian_speed = 0.08 # m/s
     
     # Paramètres du modèle de frottement (à ajuster selon ton robot)
     # tau_model = fc * sign(q_dot) + fv * q_dot
@@ -506,7 +506,7 @@ def admittance_control():
             while carte_servo2.in_waiting > 0: lire_et_afficher(carte_servo2, "COM5 - S2")
 
             # 1. Lecture des positions actuels des moteurs
-            q_curr = np.array([angles_actuels["COM9 - S1"][-1], angles_actuels["COM5 - S2"][-1]])
+            q_curr = np.array([-angles_actuels["COM9 - S1"][-1], -angles_actuels["COM5 - S2"][-1]])
             
             # 2. Estimation des vitesses articulaires (q_dot)
             q_dot = (q_curr - q_prev) / dt
