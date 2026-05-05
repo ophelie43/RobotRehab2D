@@ -134,51 +134,7 @@ class PIDController:
         self.In_1 = 0.0
         self.Dn_1 = 0.0
         self.dernier_temps = time.time()
-class AdmittanceController:
-    def __init__(self, De, Ki, limite_sortie = 5.0):
-        self.De = De
-        self.Ki = Ki
-        self.limite_sortie = limite_sortie
 
-        # Variables d'état
-        self.dernier_temps = time.time()
-    def calculer(self,consigne, valeur_mesurée):
-        maintenant = time.time()
-        dt = maintenant - self.dernier_temps
-        if dt <- 0.0:
-            dt = 0.001
-        
-        #Calcul de l'erreur de force
-        Fe = consigne - valeur_mesurée
-
-        # 1. Action proportionnelle
-        Pn = (1/self.De) * Fe
-
-        # 2. Action intégrale
-        In = self.Ki * Fe * dt
-
-        # 3. Sortie
-        vr = Pn + In
-        return vr
-class LowPassFilter:
-    def __init__(self, f_cutoff, dt):
-        self.alpha = 1- np.exp(-dt * 2 * np.pi * f_cutoff)
-        self.last_val = 0.0
-
-    def update(self, val):
-        filtered_val = (1 - self.alpha) * self.last_val + self.alpha * val
-        self.last_val = filtered_val
-        return filtered_val
-
-# Initialisation des deux PID (Gains ajustés pour un mouvement calme et précis)
-pid_moteur1 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
-pid_moteur2 = PIDController(Kp=0.8, Ki=2.0, Kd=0.05, alpha=0.03, limite_sortie=15.0)
-
-admitance_moteur1 = AdmittanceController(De = 1.0, Ki = 1.0)
-admitance_moteur2 = AdmittanceController(De = 1.0, Ki = 1.0)
-
-lp_f1 = LowPassFilter(f_cutoff = 5.0, dt = dt)
-lp_f4 = LowPassFilter(f_cutoff = 5.0, dt = dt)
 # --- 3. Fonctions CSV ---
 def initialiser_csv():
     if not os.path.exists(NOM_FICHIER_CSV):
