@@ -389,23 +389,24 @@ def executer_cercle():
     sauvegarder_donnees(donnees_a_sauver)
     print(f"Jarvis : Cercle termine. {len(donnees_a_sauver)} points enregistres.")
 
-
 def admittance_control():
     dt = 0.02
     force_threshold = 0.1
     max_cartesian_speed = 0.08
+    scale_force = 0.1  # Facteur d'échelle pour la visualisation du vecteur force
 
-    admittance_x = AdmittanceController(De=0.3, Ki=0.0, Bd=0.1)
-    admittance_y = AdmittanceController(De=0.3, Ki=0.0, Bd=0.1)
+    admittance_x = AdmittanceController(De=0.01, Ki=0.0, Bd=0.1)
+    admittance_y = AdmittanceController(De=0.01, Ki=0.0, Bd=0.1)
 
-    fc = 0.1
-    fv = 0.05
+    # Configuration du graphique en temps réel
+    plt.ion() # Mode interactif
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    print("\nJarvis : Mode Admittance actif (Ferme la fenêtre pour quitter)")
 
-    print("\nJarvis : Mode Admittance actif")
-
-    while True:
+    while plt.fignum_exists(fig.number):
         try:
-            # lecture capteurs
+            # --- Lecture et Traitement des données ---
             while carte_servo1.in_waiting > 0:
                 lire_et_afficher(carte_servo1, "COM9 - S1")
             while carte_servo2.in_waiting > 0:
@@ -413,64 +414,74 @@ def admittance_control():
 
             ang1 = angles_actuels["COM9 - S1"][-1]
             ang4 = angles_actuels["COM5 - S2"][-1]
-
-            q = np.array([ang1, ang4])
-
-            # vitesse articulaire
-            q_dot = np.zeros(2)
-
-            # courant → torque
-            tau1 = current_to_torque(courants_actuels["COM9 - S1"], angles_actuels["COM9 - S1"])
-            tau4 = current_to_torque(courants_actuels["COM5 - S2"], angles_actuels["COM5 - S2"])
-
-            tau_ext = np.array([tau1, tau4])
-
-            # force
-            f1, f2 = dynamique(ang1, ang4, tau_ext[0], tau_ext[1])
+            
+            # Courant → Couple → Force
+            c1 = lp_f1.update(courants_actuels["COM9 - S1"])
+            c4 = lp_f1.update(courants_actuels["COM5 - S2"])
+            tau1 = current_to_torque(c1, angles_actuels["COM9 - S1"])
+            tau4 = current_to_torque(c4, angles_actuels["COM5 - S2"])
+            f1, f2 = dynamique(ang1, ang4, tau1, tau4)
             f = np.array([f1, f2])
 
-            # filtre
-            f[0] = lp_f1.update(f[0])
-            f[1] = lp_f4.update(f[1])
-
-            # deadzone
+            # Deadzone
             f[np.abs(f) < force_threshold] = 0.0
 
-            # ADMITTANCE → vitesse
+            # Admittance → Vitesse → Nouvelle Position
             vx = admittance_x.calculer(0, f[0])
             vy = admittance_y.calculer(0, f[1])
             v = np.array([vx, vy])
 
-            # saturation vitesse
+            # Saturation vitesse
             norm = np.linalg.norm(v)
             if norm > max_cartesian_speed:
                 v = v / norm * max_cartesian_speed
 
-            # position réelle
             rx, ry = cinematique_directe(ang1, ang4)
-            if rx is None:
-                continue
+            if rx is None: continue
 
             x_meas = np.array([rx, ry])
-
-            # ⭐⭐ POINT CRITIQUE ⭐⭐
             x_cmd = x_meas + v * dt
 
-            # sécurité workspace
+            # Sécurité Workspace & Envoi
             x_cmd[0] = np.clip(x_cmd[0], -0.2, 0.2)
             x_cmd[1] = np.clip(x_cmd[1], 0.2, 0.45)
-
             th1, th4 = cinematique_inverse(x_cmd[0], x_cmd[1])
 
             carte_servo1.write(f"S:{th1 - 7.0}\n".encode())
             carte_servo2.write(f"S:{th4 + 9.0}\n".encode())
 
-            print(f"F=({f[0]:.2f},{f[1]:.2f}) V=({vx:.3f},{vy:.3f})")
+            # --- Mise à jour du Graphique ---
+            ax.clear()
+            # Zone de travail (Workspace)
+            ax.set_xlim(-0.3, 0.3)
+            ax.set_ylim(0.15, 0.5)
+            ax.set_aspect('equal')
+            ax.grid(True, linestyle='--', alpha=0.6)
+            
+            # Position actuelle (End-Effector)
+            ax.plot(rx, ry, 'ro', markersize=8, label="End Effector")
+            
+            # Vecteur de Force (en Bleu)
+            # On multiplie par scale_force pour que le vecteur soit visible à l'écran
+            ax.quiver(rx, ry, f[0]*scale_force, f[1]*scale_force, 
+                      angles='xy', scale_units='xy', scale=1, color='b', 
+                      label=f"Force Ext: {np.linalg.norm(f):.2f}N")
+            
+            # Vecteur Vitesse/Direction (en Vert)
+            ax.quiver(rx, ry, v[0], v[1], 
+                      angles='xy', scale_units='xy', scale=1, color='g', 
+                      label="Vitesse (Cmd)")
 
-            time.sleep(dt)
+            ax.set_title("Contrôle par Admittance - Vecteurs de Force")
+            ax.legend(loc='upper right')
+            
+            plt.pause(0.01) # Nécessaire pour rafraîchir l'affichage
 
         except KeyboardInterrupt:
             break
+    
+    plt.ioff()
+    plt.close()
 
 
 # --- 8. Interface & Boucle Principale ---
@@ -513,3 +524,5 @@ except KeyboardInterrupt:
     print("\nFermeture.")
     carte_servo1.close()
     carte_servo2.close()
+
+
